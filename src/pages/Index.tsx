@@ -5,6 +5,8 @@ import { DocumentInput } from "@/components/DocumentInput";
 import { EmptyState } from "@/components/EmptyState";
 import { TypingIndicator } from "@/components/TypingIndicator";
 import { FileText } from "lucide-react";
+import { streamChat } from "@/lib/streamChat";
+import { toast } from "sonner";
 
 interface Message {
   id: string;
@@ -53,18 +55,38 @@ const Index = () => {
     setMessages((prev) => [...prev, userMessage]);
     setIsLoading(true);
 
-    // Simulate AI response - replace with actual RAG backend call
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    let assistantContent = "";
+    const assistantId = (Date.now() + 1).toString();
 
-    // Demo response - in production, this comes from your RAG backend
-    const assistantMessage: Message = {
-      id: (Date.now() + 1).toString(),
-      role: "assistant",
-      content: getDemoResponse(content),
-    };
+    const conversationHistory = messages.map((m) => ({
+      role: m.role,
+      content: m.content,
+    }));
 
-    setMessages((prev) => [...prev, assistantMessage]);
-    setIsLoading(false);
+    await streamChat({
+      question: content,
+      documentUrl,
+      conversationHistory,
+      onDelta: (chunk) => {
+        assistantContent += chunk;
+        setMessages((prev) => {
+          const last = prev[prev.length - 1];
+          if (last?.role === "assistant" && last.id === assistantId) {
+            return prev.map((m) =>
+              m.id === assistantId ? { ...m, content: assistantContent } : m
+            );
+          }
+          return [...prev, { id: assistantId, role: "assistant", content: assistantContent }];
+        });
+      },
+      onDone: () => {
+        setIsLoading(false);
+      },
+      onError: (error) => {
+        setIsLoading(false);
+        toast.error(error);
+      },
+    });
   };
 
   return (
@@ -135,24 +157,5 @@ const Index = () => {
     </div>
   );
 };
-
-// Demo responses - replace with actual RAG backend
-function getDemoResponse(query: string): string {
-  const lowerQuery = query.toLowerCase();
-
-  if (lowerQuery.includes("summarize") || lowerQuery.includes("main points")) {
-    return "The document covers three main areas: project objectives, implementation timeline, and resource allocation. Key findings indicate a 23% improvement in efficiency metrics compared to baseline measurements (Section 2.1). The proposed methodology follows industry best practices as outlined in the appendix (Section 4.3).";
-  }
-
-  if (lowerQuery.includes("finding") || lowerQuery.includes("result")) {
-    return "The key findings are: (1) User engagement increased by 45% after implementation (Section 3.2), (2) Cost reduction of approximately $12,000 monthly (Section 3.4), and (3) Customer satisfaction scores improved from 3.2 to 4.1 on a 5-point scale (Section 3.5).";
-  }
-
-  if (lowerQuery.includes("section")) {
-    return "Section 2 details the methodology used in this analysis. It describes the data collection process spanning Q1-Q3 2024, the statistical methods applied (regression analysis and cohort comparison), and the validation criteria used to ensure data integrity (Section 2.1-2.3).";
-  }
-
-  return "Based on the document content, the information relates to project planning and execution phases. The document emphasizes stakeholder alignment and iterative feedback loops as critical success factors (Section 1.2). For more specific details, please ask about a particular section or topic.";
-}
 
 export default Index;
