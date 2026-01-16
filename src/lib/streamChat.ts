@@ -1,5 +1,3 @@
-import { supabase } from "@/integrations/supabase/client";
-
 type Message = { role: "user" | "assistant"; content: string };
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/document-chat`;
@@ -22,19 +20,10 @@ export async function streamChat({
   onError,
 }: StreamChatParams) {
   try {
-    // Get the current user session for authenticated requests
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-    
-    if (sessionError || !session) {
-      onError("Please sign in to use this feature.");
-      return;
-    }
-
     const resp = await fetch(CHAT_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${session.access_token}`,
       },
       body: JSON.stringify({ question, documentUrl, conversationHistory }),
     });
