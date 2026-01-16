@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -51,31 +52,58 @@ OUTPUT FORMAT:
 - Answer first, citations at the end of sentences.
 - No markdown unless explicitly requested.`;
 
-async function fetchGoogleDocContent(url: string): Promise<string> {
+// Maximum document size: 5MB
+const MAX_DOCUMENT_SIZE = 5 * 1024 * 1024;
+// Fetch timeout: 10 seconds
+const FETCH_TIMEOUT_MS = 10000;
+
+/**
+ * Validates that the URL is a legitimate Google Docs URL
+ * Prevents SSRF attacks by strictly validating the hostname
+ */
+function isValidGoogleDocsUrl(url: string): boolean {
   try {
-    // Extract document ID from various Google Docs URL formats
-    const patterns = [
-      /\/document\/d\/([a-zA-Z0-9_-]+)/,
-      /id=([a-zA-Z0-9_-]+)/,
-      /^([a-zA-Z0-9_-]+)$/
-    ];
+    const parsed = new URL(url);
+    const allowedHosts = ['docs.google.com', 'drive.google.com'];
+    return allowedHosts.includes(parsed.hostname) && parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
 
-    let docId: string | null = null;
-    for (const pattern of patterns) {
-      const match = url.match(pattern);
-      if (match) {
-        docId = match[1];
-        break;
-      }
+async function fetchGoogleDocContent(url: string): Promise<string> {
+  // Extract document ID from various Google Docs URL formats
+  const patterns = [
+    /\/document\/d\/([a-zA-Z0-9_-]+)/,
+    /id=([a-zA-Z0-9_-]+)/,
+    /^([a-zA-Z0-9_-]+)$/
+  ];
+
+  let docId: string | null = null;
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match) {
+      docId = match[1];
+      break;
     }
+  }
 
-    if (!docId) {
-      throw new Error("Invalid Google Doc URL format");
-    }
+  if (!docId) {
+    throw new Error("Invalid Google Doc URL format");
+  }
 
-    // Fetch as plain text export
-    const exportUrl = `https://docs.google.com/document/d/${docId}/export?format=txt`;
-    const response = await fetch(exportUrl);
+  // Fetch as plain text export with timeout and redirect prevention
+  const exportUrl = `https://docs.google.com/document/d/${docId}/export?format=txt`;
+  
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(exportUrl, {
+      redirect: 'error', // Prevent redirects to block SSRF
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       if (response.status === 404) {
@@ -87,7 +115,18 @@ async function fetchGoogleDocContent(url: string): Promise<string> {
       throw new Error(`Failed to fetch document: ${response.status}`);
     }
 
+    // Check content length header first if available
+    const contentLength = response.headers.get('content-length');
+    if (contentLength && parseInt(contentLength, 10) > MAX_DOCUMENT_SIZE) {
+      throw new Error("Document is too large to process.");
+    }
+
     const content = await response.text();
+    
+    // Validate content size after fetch
+    if (content.length > MAX_DOCUMENT_SIZE) {
+      throw new Error("Document is too large to process.");
+    }
     
     if (!content || content.trim().length === 0) {
       throw new Error("The document does not contain any usable information.");
@@ -95,7 +134,10 @@ async function fetchGoogleDocContent(url: string): Promise<string> {
 
     return content;
   } catch (error) {
-    console.error("Error fetching Google Doc:", error);
+    clearTimeout(timeoutId);
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error("Document fetch timed out. Please try again.");
+    }
     throw error;
   }
 }
@@ -106,11 +148,49 @@ serve(async (req) => {
   }
 
   try {
+    // Authentication check using getClaims
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader?.startsWith('Bearer ')) {
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const supabaseClient = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_ANON_KEY')!,
+      { global: { headers: { Authorization: authHeader } } }
+    );
+
+    const token = authHeader.replace('Bearer ', '');
+    const { data: claimsData, error: claimsError } = await supabaseClient.auth.getClaims(token);
+    
+    if (claimsError || !claimsData?.claims) {
+      console.error("Authentication failed:", claimsError?.message || "No claims found");
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const userId = claimsData.claims.sub;
+    console.log("Authenticated user:", userId);
+
     const { question, documentUrl, conversationHistory } = await req.json() as RequestBody;
 
     if (!question || !documentUrl) {
       return new Response(
         JSON.stringify({ error: "Question and document URL are required" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Server-side URL validation to prevent SSRF
+    if (!isValidGoogleDocsUrl(documentUrl)) {
+      console.warn("Invalid document URL attempted:", documentUrl);
+      return new Response(
+        JSON.stringify({ error: "Invalid document URL. Please provide a valid Google Docs URL." }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -149,7 +229,7 @@ serve(async (req) => {
       { role: "user", content: question }
     ];
 
-    console.log("Sending request to AI gateway with", messages.length, "messages");
+    console.log("Sending request to AI gateway for user:", userId, "with", messages.length, "messages");
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
