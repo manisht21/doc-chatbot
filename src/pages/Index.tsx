@@ -4,8 +4,9 @@ import { ChatInput } from "@/components/ChatInput";
 import { DocumentInput } from "@/components/DocumentInput";
 import { EmptyState } from "@/components/EmptyState";
 import { TypingIndicator } from "@/components/TypingIndicator";
-import { FileText } from "lucide-react";
+import { FileText, Trash2 } from "lucide-react";
 import { streamChat } from "@/lib/streamChat";
+import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
 interface Message {
@@ -94,18 +95,31 @@ const Index = () => {
       {/* Header */}
       <header className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur-sm">
         <div className="mx-auto max-w-3xl px-4 py-4">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary">
-              <FileText className="h-5 w-5 text-primary-foreground" />
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary">
+                <FileText className="h-5 w-5 text-primary-foreground" />
+              </div>
+              <div>
+                <h1 className="text-lg font-semibold text-foreground">
+                  Document Assistant
+                </h1>
+                <p className="text-xs text-muted-foreground">
+                  RAG-powered document Q&A
+                </p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-lg font-semibold text-foreground">
-                Document Assistant
-              </h1>
-              <p className="text-xs text-muted-foreground">
-                RAG-powered document Q&A
-              </p>
-            </div>
+            {messages.length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setMessages([])}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <Trash2 className="h-4 w-4 mr-1" />
+                Clear
+              </Button>
+            )}
           </div>
           <DocumentInput
             onConnect={handleConnect}
