@@ -97,7 +97,8 @@ export async function streamChat({
 
     onDone();
   } catch (error) {
-    console.error("Stream chat error:", error);
-    onError(error instanceof Error ? error.message : "Connection error");
+    // Log minimal info in production to avoid exposing internals
+    console.error("Stream chat error occurred");
+    onError("Connection error. Please try again.");
   }
 }
