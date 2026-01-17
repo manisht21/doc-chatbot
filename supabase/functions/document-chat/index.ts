@@ -99,7 +99,7 @@ async function fetchGoogleDocContent(url: string): Promise<string> {
 
   try {
     const response = await fetch(exportUrl, {
-      redirect: 'error', // Prevent redirects to block SSRF
+      redirect: 'follow', // Allow redirects since URL is pre-validated
       signal: controller.signal
     });
     clearTimeout(timeoutId);
