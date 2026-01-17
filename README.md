@@ -62,7 +62,7 @@ This project is built with:
 
 ## How can I deploy this project?
 
-Simply open(https://696b27cd5b3a953128bd1b49--googledoc-chatbot.netlify.app) and click on Share -> Publish.
+Simply open[https://696b27cd5b3a953128bd1b49--googledoc-chatbot.netlify.app/] and click on Share -> Publish.
 
 ## Can I connect a custom domain to my Lovable project?
 
